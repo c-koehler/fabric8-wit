@@ -26,6 +26,25 @@ import (
 	errs "github.com/pkg/errors"
 )
 
+type KubeClientResourceProvider interface {
+	GetResource(url string, allowMissing bool) (map[interface{}]interface{}, error)
+	GetClusterURL() string
+	GetBearerToken() string
+}
+
+type defaultKubeClientResourceProvider struct{
+	clusterURL string
+	bearerToken string
+}
+
+func (k defaultKubeClientResourceProvider) GetClusterURL() string {
+	return k.clusterURL
+}
+
+func (k defaultKubeClientResourceProvider) GetBearerToken() string {
+	return k.bearerToken
+}
+
 // KubeClientConfig holds configuration data needed to create a new KubeClientInterface
 // with kubernetes.NewKubeClient
 type KubeClientConfig struct {
@@ -41,6 +60,8 @@ type KubeClientConfig struct {
 	MetricsGetter
 	// hook to inject build configs for testing
 	BuildConfigInterface
+	// A hook to inject resource handling for testing
+	KubeClientResourceProvider
 }
 
 // KubeRESTAPIGetter has a method to access the KubeRESTAPI interface
@@ -79,6 +100,7 @@ type kubeClient struct {
 	KubeRESTAPI
 	MetricsInterface
 	BuildConfigInterface
+	KubeClientResourceProvider
 }
 
 // KubeRESTAPI collects methods that call out to the Kubernetes API server over the network
@@ -107,6 +129,11 @@ type defaultGetter struct{}
 
 // NewKubeClient creates a KubeClientInterface given a configuration
 func NewKubeClient(config *KubeClientConfig) (KubeClientInterface, error) {
+	return createKubeClient(config)
+}
+
+// Used in whitebox testing to return a struct for accessing private functions.
+func createKubeClient(config *KubeClientConfig) (*kubeClient, error) {
 	// Use default implementation if no KubernetesGetter is specified
 	if config.KubeRESTAPIGetter == nil {
 		config.KubeRESTAPIGetter = &defaultGetter{}
@@ -136,11 +163,19 @@ func NewKubeClient(config *KubeClientConfig) (KubeClientInterface, error) {
 		return nil, errs.WithStack(err)
 	}
 
+	if config.KubeClientResourceProvider == nil {
+		config.KubeClientResourceProvider = defaultKubeClientResourceProvider{
+			clusterURL: config.ClusterURL,
+			bearerToken: config.BearerToken,
+		}
+	}
+
 	kubeClient := &kubeClient{
-		config:               config,
-		KubeRESTAPI:          kubeAPI,
-		MetricsInterface:     metrics,
-		BuildConfigInterface: config.BuildConfigInterface,
+		config:                     config,
+		KubeRESTAPI:                kubeAPI,
+		MetricsInterface:           metrics,
+		BuildConfigInterface:       config.BuildConfigInterface,
+		KubeClientResourceProvider: config.KubeClientResourceProvider,
 	}
 
 	// Get environments from config map
@@ -234,7 +269,7 @@ func (kc *kubeClient) ScaleDeployment(spaceName string, appName string, envName 
 	}
 	// Look up the Scale for the DeploymentConfig corresponding to the application name in the provided environment
 	dcScaleURL := fmt.Sprintf("/oapi/v1/namespaces/%s/deploymentconfigs/%s/scale", envNS, appName)
-	scale, err := kc.getResource(dcScaleURL, true)
+	scale, err := kc.GetResource(dcScaleURL, true)
 	if err != nil {
 		return nil, errs.WithStack(err)
 	} else if scale == nil {
@@ -570,7 +605,7 @@ func (kc *kubeClient) getBuildConfigs(space string) ([]string, error) {
 	// BuildConfigs created by fabric8 have a "space" label indicating the space they belong to
 	queryParam := url.QueryEscape("space=" + space)
 	bcURL := fmt.Sprintf("/oapi/v1/namespaces/%s/buildconfigs?labelSelector=%s", kc.config.UserNamespace, queryParam)
-	result, err := kc.getResource(bcURL, false)
+	result, err := kc.GetResource(bcURL, false)
 	if err != nil {
 		return nil, errs.WithStack(err)
 	}
@@ -682,7 +717,7 @@ func (kc *kubeClient) putResource(url string, putBody []byte) (*string, error) {
 
 func (kc *kubeClient) getDeploymentConfig(namespace string, appName string, space string) (*deployment, error) {
 	dcURL := fmt.Sprintf("/oapi/v1/namespaces/%s/deploymentconfigs/%s", namespace, appName)
-	result, err := kc.getResource(dcURL, true)
+	result, err := kc.GetResource(dcURL, true)
 	if err != nil {
 		return nil, errs.WithStack(err)
 	} else if result == nil {
@@ -904,6 +939,12 @@ const (
 	podUnknown     = "Unknown"
 )
 
+// Container status constants
+const (
+	containerCreating =  "ContainerCreating"
+	containerCrashLoop = "CrashLoopBackOff"
+)
+
 func (kc *kubeClient) getPodStatus(pods []*v1.Pod) ([][]string, int) {
 	/*
 	 * Use the same categorization used by the web console. See:
@@ -958,7 +999,6 @@ func (kc *kubeClient) getPodStatus(pods []*v1.Pod) ([][]string, int) {
 
 func isPodWarning(pod *v1.Pod) (warning, severe bool) {
 	const containerTimeout time.Duration = 5 * time.Minute
-	const containerCrashLoop string = "CrashLoopBackOff"
 	// Consider Unknown phase a warning state
 	if pod.Status.Phase == v1.PodUnknown {
 		return true, false
@@ -1001,7 +1041,6 @@ func isPodWarning(pod *v1.Pod) (warning, severe bool) {
 }
 
 func isPullingImage(pod *v1.Pod) bool {
-	const containerCreating string = "ContainerCreating"
 	// If pod is pending with a container waiting due to a "ContainerCreating" event,
 	// categorize as "Pulling". This may change as more information is made available.
 	// See: https://github.com/openshift/origin-web-console/blob/v3.7.0/app/scripts/filters/resources.js#L663
@@ -1103,7 +1142,7 @@ func (kc *kubeClient) getMatchingServices(namespace string, dc *deployment) (rou
 
 func (kc *kubeClient) getRoutesByService(namespace string, routesByService map[string][]*route) error {
 	routeURL := fmt.Sprintf("/oapi/v1/namespaces/%s/routes", namespace)
-	result, err := kc.getResource(routeURL, false)
+	result, err := kc.GetResource(routeURL, false)
 	if err != nil {
 		return err
 	}
@@ -1297,15 +1336,15 @@ func scoreRoute(route *route) int {
 }
 
 // Derived from: https://github.com/fabric8-services/fabric8-tenant/blob/master/openshift/kube_token.go
-func (kc *kubeClient) getResource(url string, allowMissing bool) (map[interface{}]interface{}, error) {
+func (k defaultKubeClientResourceProvider) GetResource(url string, allowMissing bool) (map[interface{}]interface{}, error) {
 	var body []byte
-	fullURL := strings.TrimSuffix(kc.config.ClusterURL, "/") + url
+	fullURL := strings.TrimSuffix(k.GetClusterURL(), "/") + url
 	req, err := http.NewRequest("GET", fullURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, errs.WithStack(err)
 	}
 	req.Header.Set("Accept", "application/yaml")
-	req.Header.Set("Authorization", "Bearer "+kc.config.BearerToken)
+	req.Header.Set("Authorization", "Bearer " + k.GetBearerToken())
 
 	client := http.DefaultClient
 	resp, err := client.Do(req)

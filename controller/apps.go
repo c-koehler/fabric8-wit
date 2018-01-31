@@ -10,33 +10,66 @@ import (
 	"os"
 	"time"
 
-	"github.com/fabric8-services/fabric8-wit/auth/authservice"
-	"github.com/fabric8-services/fabric8-wit/kubernetesV1"
-
 	"github.com/fabric8-services/fabric8-wit/app"
+	"github.com/fabric8-services/fabric8-wit/auth/authservice"
 	"github.com/fabric8-services/fabric8-wit/auth"
-	"github.com/fabric8-services/fabric8-wit/configuration"
 	witerrors "github.com/fabric8-services/fabric8-wit/errors"
+	"github.com/fabric8-services/fabric8-wit/configuration"
+	"github.com/fabric8-services/fabric8-wit/kubernetesV1"
 	"github.com/fabric8-services/fabric8-wit/log"
 	"github.com/goadesign/goa"
 	uuid "github.com/satori/go.uuid"
 )
 
-// AppsController implements the apps resource.
+type KubeClientProvider interface {
+	GetKubeClient(ctx context.Context) (kubernetesV1.KubeClientInterface, error)
+	GetConfig() *configuration.Registry
+}
+
+type KubeClientProviderDefault struct {
+	config *configuration.Registry
+}
+
+type OSIOClientV1Provider interface {
+	GetAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1
+}
+
+type OSIOClientV1ProviderDefault struct{}
+
+	// AppsController implements the apps resource.
 type AppsController struct {
 	*goa.Controller
 	Config *configuration.Registry
+	// The following are for testing.
+	KubeClientProvider
+	OSIOClientV1Provider
+}
+
+type AppsControllerConfig struct {
+	kubeClientProvider KubeClientProvider
+	osioClientV1Provider OSIOClientV1Provider
 }
 
 // NewAppsController creates a apps controller.
-func NewAppsController(service *goa.Service, config *configuration.Registry) *AppsController {
+func NewAppsController(appConfig AppsControllerConfig, service *goa.Service, registryConfig *configuration.Registry) *AppsController {
+	if appConfig.kubeClientProvider == nil {
+		appConfig.kubeClientProvider = KubeClientProviderDefault{
+			config: registryConfig,
+		}
+	}
+	if appConfig.osioClientV1Provider == nil {
+		appConfig.osioClientV1Provider = OSIOClientV1ProviderDefault{}
+	}
+
 	return &AppsController{
-		Controller: service.NewController("AppsController"),
-		Config:     config,
+		Controller:           service.NewController("AppsController"),
+		Config:               registryConfig,
+		KubeClientProvider:   appConfig.kubeClientProvider,
+		OSIOClientV1Provider: appConfig.osioClientV1Provider,
 	}
 }
 
-func getAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1 {
+func (o OSIOClientV1ProviderDefault) GetAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1 {
 
 	// defaults
 	host := "localhost"
@@ -67,7 +100,7 @@ func getAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1 {
 func (c *AppsController) getSpaceNameFromSpaceID(ctx context.Context, spaceID uuid.UUID) (*string, error) {
 	// TODO - add a cache in AppsController - but will break if user can change space name
 	// use WIT API to convert Space UUID to Space name
-	osioclient := getAndCheckOSIOClientV1(ctx)
+	osioclient := c.GetAndCheckOSIOClientV1(ctx)
 
 	osioSpace, err := osioclient.GetSpaceByID(ctx, spaceID)
 	if err != nil {
@@ -77,8 +110,8 @@ func (c *AppsController) getSpaceNameFromSpaceID(ctx context.Context, spaceID uu
 }
 
 func getNamespaceNameV1(ctx context.Context) (*string, error) {
-
-	osioclient := getAndCheckOSIOClientV1(ctx)
+	osioProvider := OSIOClientV1ProviderDefault{}
+	osioclient := osioProvider.GetAndCheckOSIOClientV1(ctx)
 	kubeSpaceAttr, err := osioclient.GetNamespaceByType(ctx, nil, "user")
 	if err != nil {
 		return nil, err
@@ -138,12 +171,15 @@ func getTokenDataV1(authClient authservice.Client, ctx context.Context, forServi
 	return &respType, nil
 }
 
+func (c KubeClientProviderDefault) GetConfig() *configuration.Registry {
+	return c.config
+}
+
 // getKubeClient createa kube client for the appropriate cluster assigned to the current user.
 // many different errors are possible, so controllers should call getAndCheckKubeClient() instead
-func (c *AppsController) getKubeClient(ctx context.Context) (kubernetesV1.KubeClientInterface, error) {
-
+func (c KubeClientProviderDefault) GetKubeClient(ctx context.Context) (kubernetesV1.KubeClientInterface, error) {
 	// create Auth API client
-	authClient, err := auth.CreateClient(ctx, c.Config)
+	authClient, err := auth.CreateClient(ctx, c.GetConfig())
 	if err != nil {
 		log.Error(ctx, nil, "error accessing Auth server"+tostring(err))
 		return nil, err
@@ -197,7 +233,7 @@ func (c *AppsController) SetDeployment(ctx *app.SetDeploymentAppsContext) error 
 		return witerrors.NewBadParameterError("podCount", "missing")
 	}
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -239,7 +275,7 @@ func (c *AppsController) ShowDeploymentStatSeries(ctx *app.ShowDeploymentStatSer
 		return witerrors.NewBadParameterError("end", *ctx.End)
 	}
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -267,7 +303,7 @@ func (c *AppsController) ShowDeploymentStatSeries(ctx *app.ShowDeploymentStatSer
 // ShowDeploymentStats runs the showDeploymentStats action.
 func (c *AppsController) ShowDeploymentStats(ctx *app.ShowDeploymentStatsAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -303,7 +339,7 @@ func (c *AppsController) ShowDeploymentStats(ctx *app.ShowDeploymentStatsAppsCon
 // ShowEnvironment runs the showEnvironment action.
 func (c *AppsController) ShowEnvironment(ctx *app.ShowEnvironmentAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -326,7 +362,7 @@ func (c *AppsController) ShowEnvironment(ctx *app.ShowEnvironmentAppsContext) er
 // ShowSpace runs the showSpace action.
 func (c *AppsController) ShowSpace(ctx *app.ShowSpaceAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -355,7 +391,7 @@ func (c *AppsController) ShowSpace(ctx *app.ShowSpaceAppsContext) error {
 // ShowSpaceApp runs the showSpaceApp action.
 func (c *AppsController) ShowSpaceApp(ctx *app.ShowSpaceAppAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -383,7 +419,7 @@ func (c *AppsController) ShowSpaceApp(ctx *app.ShowSpaceAppAppsContext) error {
 // ShowSpaceAppDeployment runs the showSpaceAppDeployment action.
 func (c *AppsController) ShowSpaceAppDeployment(ctx *app.ShowSpaceAppDeploymentAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -411,7 +447,7 @@ func (c *AppsController) ShowSpaceAppDeployment(ctx *app.ShowSpaceAppDeploymentA
 // ShowEnvAppPods runs the showEnvAppPods action.
 func (c *AppsController) ShowEnvAppPods(ctx *app.ShowEnvAppPodsAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}
@@ -431,7 +467,7 @@ func (c *AppsController) ShowEnvAppPods(ctx *app.ShowEnvAppPodsAppsContext) erro
 // ShowSpaceEnvironments runs the showSpaceEnvironments action.
 func (c *AppsController) ShowSpaceEnvironments(ctx *app.ShowSpaceEnvironmentsAppsContext) error {
 
-	kc, err := c.getKubeClient(ctx)
+	kc, err := c.GetKubeClient(ctx)
 	if err != nil {
 		return witerrors.NewUnauthorizedError("openshift token")
 	}

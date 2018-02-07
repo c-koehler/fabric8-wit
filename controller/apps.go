@@ -23,35 +23,119 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+type ContextResponder interface {
+	SendShowDeploymentStatSeriesAppsOK(res *app.SimpleDeploymentStatSeriesV1Single, ctx *app.ShowDeploymentStatSeriesAppsContext) error
+	SendShowDeploymentStatsOK(res *app.SimpleDeploymentStatsV1Single, ctx *app.ShowDeploymentStatsAppsContext) error
+	SendEnvironmentSingleOK(res *app.SimpleEnvironmentV1Single, ctx *app.ShowEnvironmentAppsContext) error
+	SendSpaceOK(res *app.SimpleSpaceV1Single, ctx *app.ShowSpaceAppsContext) error
+	SendSimpleAppOK(res *app.SimpleApplicationV1Single, ctx *app.ShowSpaceAppAppsContext) error
+	SendSimpleDeploymentSingleOK(res *app.SimpleDeploymentV1Single, ctx *app.ShowSpaceAppDeploymentAppsContext) error
+	SendEnvAppPodsOK(res []byte, ctx *app.ShowEnvAppPodsAppsContext) error
+	SendEnvironmentsOK(res *app.SimpleEnvironmentV1List, ctx *app.ShowSpaceEnvironmentsAppsContext) error
+}
+
+type KubeClientGetterDefault struct {
+	config *configuration.Registry
+}
+
+type OSIOClientGetter interface {
+	GetAndCheckOSIOClient(ctx context.Context) OpenshiftIOClient
+}
+
+type osioClientGetterDefault struct{}
+
 // AppsController implements the apps resource.
 type AppsController struct {
 	*goa.Controller
 	Config *configuration.Registry
+	ContextResponder ContextResponder
 	KubeClientGetter
+	OSIOClientGetter
 }
 
 // KubeClientGetter creates an instance of KubeClientInterface
 type KubeClientGetter interface {
 	GetKubeClient(ctx context.Context) (kubernetesV1.KubeClientInterface, error)
+	GetConfig() *configuration.Registry
 }
 
 // Default implementation of KubeClientGetter used by NewAppsController
 type defaultKubeClientGetter struct {
 	config *configuration.Registry
+	// The following are for testing.
+	KubeClientGetter
+	OSIOClientGetter
+	ContextResponder
+}
+
+type AppsControllerConfig struct {
+	kubeClientGetter KubeClientGetter
+	osioClientGetter OSIOClientGetter
+	contextResponder ContextResponder
+}
+
+type appsControllerContextResponser struct{}
+
+func (r appsControllerContextResponser) SendShowDeploymentStatSeriesAppsOK(res *app.SimpleDeploymentStatSeriesV1Single, ctx *app.ShowDeploymentStatSeriesAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendShowDeploymentStatsOK(res *app.SimpleDeploymentStatsV1Single, ctx *app.ShowDeploymentStatsAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendEnvironmentSingleOK(res *app.SimpleEnvironmentV1Single, ctx *app.ShowEnvironmentAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendSpaceOK(res *app.SimpleSpaceV1Single, ctx *app.ShowSpaceAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendSimpleAppOK(res *app.SimpleApplicationV1Single, ctx *app.ShowSpaceAppAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendSimpleDeploymentSingleOK(res *app.SimpleDeploymentV1Single, ctx *app.ShowSpaceAppDeploymentAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendEnvAppPodsOK(res []byte, ctx *app.ShowEnvAppPodsAppsContext) error {
+	return ctx.OK(res)
+}
+
+func (r appsControllerContextResponser) SendEnvironmentsOK(res *app.SimpleEnvironmentV1List, ctx *app.ShowSpaceEnvironmentsAppsContext) error {
+	return ctx.OK(res)
 }
 
 // NewAppsController creates a apps controller.
 func NewAppsController(service *goa.Service, config *configuration.Registry) *AppsController {
+	return createAppsController(AppsControllerConfig{}, service, config)
+}
+
+func createAppsController(appConfig AppsControllerConfig, service *goa.Service, registryConfig *configuration.Registry)*AppsController {
+	if appConfig.kubeClientGetter == nil {
+		appConfig.kubeClientGetter = defaultKubeClientGetter{
+			config: registryConfig,
+		}
+	}
+	if appConfig.osioClientGetter == nil {
+		appConfig.osioClientGetter = osioClientGetterDefault{}
+	}
+	if appConfig.contextResponder == nil {
+		appConfig.contextResponder = appsControllerContextResponser{}
+	}
+
 	return &AppsController{
-		Controller: service.NewController("AppsController"),
-		Config:     config,
-		KubeClientGetter: &defaultKubeClientGetter{
-			config: config,
-		},
+		Controller:       service.NewController("AppsController"),
+		Config:           registryConfig,
+		KubeClientGetter: appConfig.kubeClientGetter,
+		OSIOClientGetter: appConfig.osioClientGetter,
+		ContextResponder: appConfig.contextResponder,
 	}
 }
 
-func getAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1 {
+func (o osioClientGetterDefault) GetAndCheckOSIOClient(ctx context.Context) OpenshiftIOClient {
 
 	// defaults
 	host := "localhost"
@@ -74,7 +158,7 @@ func getAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1 {
 		scheme = witurl.Scheme
 	}
 
-	oc := NewOSIOClientV1(ctx, scheme, host)
+	oc := NewOSIOClient(ctx, scheme, host)
 
 	return oc
 }
@@ -82,7 +166,7 @@ func getAndCheckOSIOClientV1(ctx context.Context) *OSIOClientV1 {
 func (c *AppsController) getSpaceNameFromSpaceID(ctx context.Context, spaceID uuid.UUID) (*string, error) {
 	// TODO - add a cache in AppsController - but will break if user can change space name
 	// use WIT API to convert Space UUID to Space name
-	osioclient := getAndCheckOSIOClientV1(ctx)
+	osioclient := c.GetAndCheckOSIOClient(ctx)
 
 	osioSpace, err := osioclient.GetSpaceByID(ctx, spaceID)
 	if err != nil {
@@ -93,7 +177,8 @@ func (c *AppsController) getSpaceNameFromSpaceID(ctx context.Context, spaceID uu
 
 func getNamespaceNameV1(ctx context.Context) (*string, error) {
 
-	osioclient := getAndCheckOSIOClientV1(ctx)
+	osioClientGetter := osioClientGetterDefault{}
+	osioclient := osioClientGetter.GetAndCheckOSIOClient(ctx)
 	kubeSpaceAttr, err := osioclient.GetNamespaceByType(ctx, nil, "user")
 	if err != nil {
 		return nil, err
@@ -153,11 +238,15 @@ func getTokenDataV1(authClient authservice.Client, ctx context.Context, forServi
 	return &respType, nil
 }
 
+func (c KubeClientGetterDefault) GetConfig() *configuration.Registry {
+	return c.config
+}
+
 // GetKubeClient creates a kube client for the appropriate cluster assigned to the current user
-func (g *defaultKubeClientGetter) GetKubeClient(ctx context.Context) (kubernetesV1.KubeClientInterface, error) {
+func (c KubeClientGetterDefault) GetKubeClient(ctx context.Context) (kubernetesV1.KubeClientInterface, error) {
 
 	// create Auth API client
-	authClient, err := auth.CreateClient(ctx, g.config)
+	authClient, err := auth.CreateClient(ctx, c.GetConfig())
 	if err != nil {
 		log.Error(ctx, nil, "error accessing Auth server"+tostring(err))
 		return nil, err
@@ -277,7 +366,7 @@ func (c *AppsController) ShowDeploymentStatSeries(ctx *app.ShowDeploymentStatSer
 		Data: statSeries,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendShowDeploymentStatSeriesAppsOK(res, ctx)
 }
 
 // ShowDeploymentStats runs the showDeploymentStats action.
@@ -314,7 +403,7 @@ func (c *AppsController) ShowDeploymentStats(ctx *app.ShowDeploymentStatsAppsCon
 		Data: deploymentStats,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendShowDeploymentStatsOK(res, ctx)
 }
 
 // ShowEnvironment runs the showEnvironment action.
@@ -338,7 +427,7 @@ func (c *AppsController) ShowEnvironment(ctx *app.ShowEnvironmentAppsContext) er
 		Data: env,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendEnvironmentSingleOK(res, ctx)
 }
 
 // ShowSpace runs the showSpace action.
@@ -368,7 +457,7 @@ func (c *AppsController) ShowSpace(ctx *app.ShowSpaceAppsContext) error {
 		Data: space,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendSpaceOK(res, ctx)
 }
 
 // ShowSpaceApp runs the showSpaceApp action.
@@ -397,7 +486,7 @@ func (c *AppsController) ShowSpaceApp(ctx *app.ShowSpaceAppAppsContext) error {
 		Data: theapp,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendSimpleAppOK(res, ctx)
 }
 
 // ShowSpaceAppDeployment runs the showSpaceAppDeployment action.
@@ -426,7 +515,7 @@ func (c *AppsController) ShowSpaceAppDeployment(ctx *app.ShowSpaceAppDeploymentA
 		Data: deploymentStats,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendSimpleDeploymentSingleOK(res, ctx)
 }
 
 // ShowEnvAppPods runs the showEnvAppPods action.
@@ -447,7 +536,7 @@ func (c *AppsController) ShowEnvAppPods(ctx *app.ShowEnvAppPodsAppsContext) erro
 	}
 	jsonresp := "{\"pods\":" + tostring(pods) + "}\n"
 
-	return ctx.OK([]byte(jsonresp))
+	return c.ContextResponder.SendEnvAppPodsOK([]byte(jsonresp), ctx)
 }
 
 // ShowSpaceEnvironments runs the showSpaceEnvironments action.
@@ -471,7 +560,7 @@ func (c *AppsController) ShowSpaceEnvironments(ctx *app.ShowSpaceEnvironmentsApp
 		Data: envs,
 	}
 
-	return ctx.OK(res)
+	return c.ContextResponder.SendEnvironmentsOK(res, ctx)
 }
 
 func cleanup(kc kubernetesV1.KubeClientInterface) {

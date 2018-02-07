@@ -44,7 +44,7 @@ func tostring(item interface{}) string {
 	return string(bytes)
 }
 
-func getAndCheckOSIOClient(ctx context.Context) *OSIOClient {
+func getAndCheckOSIOClient(ctx context.Context) OpenshiftIOClient {
 
 	// defaults
 	host := "localhost"

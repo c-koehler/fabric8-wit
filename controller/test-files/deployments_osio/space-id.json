@@ -1,0 +1,33 @@
+{
+  "data": {
+    "attributes": {
+      "created-at": "2017-12-01T18:34:06.393371Z",
+      "description": "",
+      "name": "yet_another",
+      "updated-at": "2017-12-01T18:34:06.393371Z",
+      "version": 0
+    },
+    "id": "00000000-0000-0000-0000-000000000000",
+    "links": {
+      "backlog": {
+        "meta": {
+          "totalCount": 0
+        },
+        "self": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/backlog"
+      },
+      "filters": "https://api.openshift.io/api/filters",
+      "related": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000",
+      "self": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000",
+      "workitemlinktypes": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/workitemlinktypes",
+      "workitemtypes": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/workitemtypes"
+    },
+    "relationships": {
+      "areas": {
+        "links": {
+          "related": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/areas"
+        }
+      }
+    },
+    "type": "spaces"
+  }
+}

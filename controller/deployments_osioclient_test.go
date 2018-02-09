@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"testing"
 
@@ -13,6 +14,16 @@ import (
 	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/require"
 )
+
+const (
+	deploymentsOsioTestFilePath = "test-files/deployments_osio/"
+)
+
+func readJsonFromTestFile(t *testing.T, testFilePath string) *bytes.Buffer {
+	data, err := ioutil.ReadFile(testFilePath)
+	require.NoError(t, err, "Unable to read test file data from: " + testFilePath)
+	return bytes.NewBuffer(data)
+}
 
 // Structs and interfaces for mocking/testing
 type MockContext struct {
@@ -57,9 +68,6 @@ func (m *MockWitClient) ShowUserService(ctx context.Context, path string) (*http
 // Unit tests
 func TestGetUserServicesWithShowUserServiceError(t *testing.T) {
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      nil,
 		UserServiceHttpResponseError: errors.New("error"),
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, &controller.IOResponseReader{})
@@ -84,10 +92,7 @@ func TestGetUserServicesBadStatusCodes(t *testing.T) {
 			StatusCode: testCase.statusCode,
 		}
 		mockWitClient := &MockWitClient{
-			SpaceHttpResponse:            nil,
-			SpaceHttpResponseError:       nil,
-			UserServiceHttpResponse:      mockResponse,
-			UserServiceHttpResponseError: nil,
+			UserServiceHttpResponse: mockResponse,
 		}
 		mockOSIOClient := controller.CreateOSIOClient(mockWitClient, &controller.IOResponseReader{})
 
@@ -110,10 +115,7 @@ func TestGetUserServiceWithMalformedJSON(t *testing.T) {
 		StatusCode: http.StatusOK,
 	}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      mockResponse,
-		UserServiceHttpResponseError: nil,
+		UserServiceHttpResponse: mockResponse,
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, jsonReader)
 
@@ -123,61 +125,14 @@ func TestGetUserServiceWithMalformedJSON(t *testing.T) {
 
 func TestUserServiceWithProperJSON(t *testing.T) {
 	jsonReader := &JsonResponseReader{
-		jsonBytes: bytes.NewBuffer([]byte(`
-			{
-				"data": {
-					"attributes": {
-						"bio": "",
-						"cluster": "https://some-random-cluster-dot.com",
-						"company": "",
-						"contextInformation": {
-							"experimentalFeatures": {
-								"enabled": true
-							},
-							"recentContexts": [
-								{
-									"space": "00000000-0000-0000-0000-000000000000",
-									"user": "11111111-1111-1111-1111-111111111111"
-								},
-								{
-									"space": null,
-									"user": "22222222-2222-2222-2222-222222222222"
-								}
-							],
-							"recentSpaces": ["33333333-3333-3333-3333-333333333333"]
-						},
-						"created-at": "2017-11-03T16:39:45.566361Z",
-						"email": "email@somerandomemailhere.email",
-						"emailPrivate": true,
-						"emailVerified": true,
-						"fullName": "Dr. Legit Email",
-						"identityID": "44444444-4444-4444-4444-444444444444",
-						"imageURL": "https://www.gravatar.com/avatar/00000000000000000000000000000000.jpg",
-						"providerType": "kc",
-						"registrationCompleted": true,
-						"updated-at": "2018-01-16T19:43:41.859203Z",
-						"url": "",
-						"userID": "55555555-5555-5555-5555-555555555555",
-						"username": "username"
-					},
-					"id": "66666666-6666-6666-6666-666666666666",
-					"links": {
-						"related": "https://auth.openshift.io/api/users/77777777-7777-7777-7777-777777777777",
-						"self": "https://auth.openshift.io/api/users/88888888-8888-8888-8888-888888888888"
-					},
-					"type": "identities"
-				}
-			}`)),
+		jsonBytes: readJsonFromTestFile(t, deploymentsOsioTestFilePath + "user-service.json"),
 	}
 	mockResponse := &http.Response{
 		Body:       &MockResponseBodyReader{},
 		StatusCode: http.StatusOK,
 	}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      mockResponse,
-		UserServiceHttpResponseError: nil,
+		UserServiceHttpResponse: mockResponse,
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, jsonReader)
 
@@ -193,10 +148,7 @@ func TestUserServiceWithProperJSON(t *testing.T) {
 func TestGetSpaceByIDWithShowSpaceError(t *testing.T) {
 	mockContext := &MockContext{}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       errors.New("error"),
-		UserServiceHttpResponse:      nil,
-		UserServiceHttpResponseError: nil,
+		SpaceHttpResponseError: errors.New("error"),
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, &controller.IOResponseReader{})
 
@@ -220,10 +172,7 @@ func TestGetSpaceByIDBadStatusCode(t *testing.T) {
 			StatusCode: testCase.statusCode,
 		}
 		mockWitClient := &MockWitClient{
-			SpaceHttpResponse:            mockResponse,
-			SpaceHttpResponseError:       nil,
-			UserServiceHttpResponse:      nil,
-			UserServiceHttpResponseError: nil,
+			SpaceHttpResponse: mockResponse,
 		}
 		mockOSIOClient := controller.CreateOSIOClient(mockWitClient, &controller.IOResponseReader{})
 
@@ -246,10 +195,7 @@ func TestGetSpaceByIDWithMalformedJSON(t *testing.T) {
 		StatusCode: http.StatusOK,
 	}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            mockResponse,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      nil,
-		UserServiceHttpResponseError: nil,
+		SpaceHttpResponse: mockResponse,
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, jsonReader)
 
@@ -259,39 +205,7 @@ func TestGetSpaceByIDWithMalformedJSON(t *testing.T) {
 
 func TestGetSpaceByIDWithProperJSON(t *testing.T) {
 	jsonReader := &JsonResponseReader{
-		jsonBytes: bytes.NewBuffer([]byte(`{
-			"data": {
-				"attributes": {
-					"created-at": "2017-12-01T18:34:06.393371Z",
-					"description": "",
-					"name": "yet_another",
-					"updated-at": "2017-12-01T18:34:06.393371Z",
-					"version": 0
-				},
-				"id": "00000000-0000-0000-0000-000000000000",
-				"links": {
-					"backlog": {
-						"meta": {
-							"totalCount": 0
-						},
-						"self": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/backlog"
-					},
-					"filters": "https://api.openshift.io/api/filters",
-					"related": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000",
-					"self": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000",
-					"workitemlinktypes": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/workitemlinktypes",
-					"workitemtypes": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/workitemtypes"
-				},
-				"relationships": {
-					"areas": {
-						"links": {
-							"related": "https://api.openshift.io/api/spaces/00000000-0000-0000-0000-000000000000/areas"
-						}
-					}
-				},
-				"type": "spaces"
-			}
-		}`)),
+		jsonBytes: readJsonFromTestFile(t, deploymentsOsioTestFilePath + "space-id.json"),
 	}
 	mockContext := &MockContext{}
 	mockResponse := &http.Response{
@@ -299,10 +213,7 @@ func TestGetSpaceByIDWithProperJSON(t *testing.T) {
 		StatusCode: http.StatusOK,
 	}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            mockResponse,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      nil,
-		UserServiceHttpResponseError: nil,
+		SpaceHttpResponse: mockResponse,
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, jsonReader)
 
@@ -324,9 +235,6 @@ func TestGetSpaceByIDWithProperJSON(t *testing.T) {
 
 func TestGetNamespaceByTypeErrorFromUserServices(t *testing.T) {
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      nil,
 		UserServiceHttpResponseError: errors.New("error"),
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, &controller.IOResponseReader{})
@@ -337,17 +245,10 @@ func TestGetNamespaceByTypeErrorFromUserServices(t *testing.T) {
 }
 
 func TestGetNamespaceByTypeNoMatch(t *testing.T) {
-	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      nil,
-		UserServiceHttpResponseError: nil,
-	}
-	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, &controller.IOResponseReader{})
+	mockOSIOClient := controller.CreateOSIOClient(&MockWitClient{}, &controller.IOResponseReader{})
 	mockUserService := &app.UserService{
 		Attributes: &app.UserServiceAttributes{
 			Namespaces: make([]*app.NamespaceAttributes, 0),
-			CreatedAt:  nil,
 		},
 	}
 
@@ -357,117 +258,47 @@ func TestGetNamespaceByTypeNoMatch(t *testing.T) {
 }
 
 func TestGetNamespaceByTypeMatchNamespace(t *testing.T) {
-	NAMESPACE_TYPE := "desiredType"
+	namespaceType := "desiredType"
 	jsonProvider := &JsonResponseReader{
-		jsonBytes: bytes.NewBuffer([]byte(`{
-			"data": {
-				"attributes": {
-					"bio": "",
-					"cluster": "https://some-random-cluster-dot.com",
-					"company": "",
-					"contextInformation": {
-						"experimentalFeatures": {
-							"enabled": true
-						},
-						"recentContexts": [
-							{
-								"space": "00000000-0000-0000-0000-000000000000",
-								"user": "11111111-1111-1111-1111-111111111111"
-							},
-							{
-								"space": null,
-								"user": "22222222-2222-2222-2222-222222222222"
-							}
-						],
-						"recentSpaces": ["33333333-3333-3333-3333-333333333333"]
-					},
-					"created-at": "2017-11-03T16:39:45.566361Z",
-					"email": "email@somerandomemailhere.email",
-					"emailPrivate": true,
-					"emailVerified": true,
-					"fullName": "Dr. Legit Email",
-					"identityID": "44444444-4444-4444-4444-444444444444",
-					"imageURL": "https://www.gravatar.com/avatar/00000000000000000000000000000000.jpg",
-					"providerType": "kc",
-					"registrationCompleted": true,
-					"updated-at": "2018-01-16T19:43:41.859203Z",
-					"url": "",
-					"userID": "55555555-5555-5555-5555-555555555555",
-					"username": "username"
-				},
-				"id": "66666666-6666-6666-6666-666666666666",
-				"links": {
-					"related": "https://auth.openshift.io/api/users/77777777-7777-7777-7777-777777777777",
-					"self": "https://auth.openshift.io/api/users/88888888-8888-8888-8888-888888888888"
-				},
-				"type": "desiredType"
-			}
-		}`)),
+		jsonBytes: readJsonFromTestFile(t, deploymentsOsioTestFilePath + "namespace-by-type.json"),
 	}
 	mockNamespace := &app.NamespaceAttributes{
-		Type: &NAMESPACE_TYPE,
+		Type: &namespaceType,
 	}
 	mockResponse := &http.Response{
 		Body:       &MockResponseBodyReader{},
 		StatusCode: http.StatusOK,
 	}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      mockResponse,
-		UserServiceHttpResponseError: nil,
+		UserServiceHttpResponse: mockResponse,
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, jsonProvider)
 	mockUserService := &app.UserService{
 		Attributes: &app.UserServiceAttributes{
 			Namespaces: []*app.NamespaceAttributes{mockNamespace},
-			CreatedAt:  nil,
 		},
 	}
-	namespaceAttributes, err := mockOSIOClient.GetNamespaceByType(&MockContext{}, mockUserService, NAMESPACE_TYPE)
+	namespaceAttributes, err := mockOSIOClient.GetNamespaceByType(&MockContext{}, mockUserService, namespaceType)
 	require.NoError(t, err)
 	require.Equal(t, mockNamespace, namespaceAttributes)
 }
 
 func TestGetNamespaceByTypeMatchNamespaceWithDiscoveredUserService(t *testing.T) {
-	NAMESPACE_TYPE := "desiredType"
+	namespaceType := "desiredType"
 	jsonProvider := &JsonResponseReader{
-		jsonBytes: bytes.NewBuffer([]byte(`{
-			"data": {
-				"attributes": {
-					"created-at": "2017-11-03T16:39:45.566361Z",
-					"namespaces": [
-						{
-							"name": "some-name",
-							"state": "some-state",
-							"type": "desiredType",
-							"version": "123"
-						}
-					]
-				},
-				"id": "66666666-6666-6666-6666-666666666666",
-				"links": {
-					"related": "https://auth.openshift.io/api/users/77777777-7777-7777-7777-777777777777",
-					"self": "https://auth.openshift.io/api/users/88888888-8888-8888-8888-888888888888"
-				},
-				"type": "someType"
-			}
-		}`)),
+		jsonBytes: readJsonFromTestFile(t, deploymentsOsioTestFilePath + "namespace-discovered-user-service.json"),
 	}
 	mockResponse := &http.Response{
 		Body:       &MockResponseBodyReader{},
 		StatusCode: http.StatusOK,
 	}
 	mockWitClient := &MockWitClient{
-		SpaceHttpResponse:            nil,
-		SpaceHttpResponseError:       nil,
-		UserServiceHttpResponse:      mockResponse,
-		UserServiceHttpResponseError: nil,
+		UserServiceHttpResponse: mockResponse,
 	}
 	mockOSIOClient := controller.CreateOSIOClient(mockWitClient, jsonProvider)
-	namespaceAttributes, err := mockOSIOClient.GetNamespaceByType(&MockContext{}, nil, NAMESPACE_TYPE)
+	namespaceAttributes, err := mockOSIOClient.GetNamespaceByType(&MockContext{}, nil, namespaceType)
 	require.NoError(t, err)
-	require.Equal(t, NAMESPACE_TYPE, *namespaceAttributes.Type)
+	require.Equal(t, namespaceType, *namespaceAttributes.Type)
 	require.Equal(t, "some-name", *namespaceAttributes.Name)
 	require.Equal(t, "some-state", *namespaceAttributes.State)
 	require.Equal(t, "123", *namespaceAttributes.Version)

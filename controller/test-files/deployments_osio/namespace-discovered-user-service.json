@@ -1,0 +1,21 @@
+{
+    "data": {
+        "attributes": {
+            "created-at": "2017-11-03T16:39:45.566361Z",
+            "namespaces": [
+                {
+                    "name": "some-name",
+                    "state": "some-state",
+                    "type": "desiredType",
+                    "version": "123"
+                }
+            ]
+        },
+        "id": "66666666-6666-6666-6666-666666666666",
+        "links": {
+            "related": "https://auth.openshift.io/api/users/77777777-7777-7777-7777-777777777777",
+            "self": "https://auth.openshift.io/api/users/88888888-8888-8888-8888-888888888888"
+        },
+        "type": "someType"
+    }
+}
